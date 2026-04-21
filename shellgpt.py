@@ -1,4 +1,8 @@
+import getpass
+import os
+import socket
 import subprocess
+from pathlib import Path
 from typing import Any
 
 from app.models.schemas import GenerateRequest
@@ -77,6 +81,8 @@ def _print_recommendation(result: dict[str, Any], commands: list[str]) -> None:
     print("\n推荐命令:")
     for index, command in enumerate(commands, start=1):
         safety = check_command_safety(command)
+        if index == 1:
+            safety["risk_level"] = str(result.get("risk_level") or safety["risk_level"])
         print(f"[{index}] {command}")
         print(f"    风险等级: {safety['risk_level']}")
 
@@ -86,12 +92,16 @@ def _print_recommendation(result: dict[str, Any], commands: list[str]) -> None:
         print(explanation)
 
     primary_safety = check_command_safety(commands[0])
+    primary_safety["risk_level"] = str(result.get("risk_level") or primary_safety["risk_level"])
+    primary_safety["risk_reasons"] = result.get("risk_reasons") or primary_safety["risk_reasons"]
+    primary_safety["safety_tips"] = result.get("safety_tips") or primary_safety["safety_tips"]
     _print_safety(primary_safety)
 
 
 def _confirm_and_run(command: str) -> bool:
     print("\n准备执行，Enter 执行，可直接编辑命令:")
-    edited = _input_with_default("> ", command).strip()
+    prompt = _shell_prompt()
+    edited = _input_with_default(prompt, command).strip()
     if edited in {"q", ":q", ":quit"}:
         print("已退出。")
         raise SystemExit
@@ -104,7 +114,8 @@ def _confirm_and_run(command: str) -> bool:
     command = edited
 
     safety = check_command_safety(command)
-    print(f"\n最终命令: {command}")
+    print("\n最终命令:")
+    print(f"{prompt}{command}")
     _print_safety(safety)
 
     if safety["risk_level"] == "high":
@@ -123,6 +134,20 @@ def _confirm_and_run(command: str) -> bool:
         print(f"\n命令失败，退出码: {completed.returncode}")
     record_command(command, risk_level=safety["risk_level"])
     return True
+
+
+def _shell_prompt() -> str:
+    user = getpass.getuser()
+    host = socket.gethostname().split(".")[0]
+    cwd = Path.cwd()
+    home = Path.home()
+    try:
+        rel = cwd.relative_to(home)
+        cwd_text = "~" if str(rel) == "." else f"~/{rel}"
+    except ValueError:
+        cwd_text = str(cwd)
+    marker = "#" if hasattr(os, "geteuid") and os.geteuid() == 0 else "$"
+    return f"{user}@{host}:{cwd_text}{marker} "
 
 
 def _input_with_default(prompt: str, default: str) -> str:

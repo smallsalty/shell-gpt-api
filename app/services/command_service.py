@@ -28,15 +28,27 @@ def generate_command(request: GenerateRequest) -> dict[str, Any]:
         result = _fallback_generate(request.query, skills)
         source = "skills-fallback"
 
+    intent_safety = _check_query_intent_risk(request.query)
+    if _is_disk_destructive_intent(request.query):
+        result["command"] = "lsblk -f"
+        result["alternatives"] = _unique(["lsblk", "df -h", *result.get("alternatives", [])])[:3]
+        result["explanation"] = (
+            "格式化磁盘是高危操作，会永久删除目标设备数据。当前仅提供只读查看命令，"
+            "用于确认磁盘和分区信息，不直接执行格式化。"
+        )
+
     safety = check_command_safety(result["command"])
     result["risk_level"] = _max_level(
-        safety["risk_level"], str(result.get("risk_level", "low"))
+        _max_level(safety["risk_level"], str(result.get("risk_level", "low"))),
+        intent_safety["risk_level"],
     )
     result["risk_reasons"] = _merge_list(
-        safety["risk_reasons"], result.get("risk_reasons", [])
+        intent_safety["risk_reasons"],
+        _merge_list(safety["risk_reasons"], result.get("risk_reasons", [])),
     )
     result["safety_tips"] = _merge_list(
-        safety["safety_tips"], result.get("safety_tips", [])
+        intent_safety["safety_tips"],
+        _merge_list(safety["safety_tips"], result.get("safety_tips", [])),
     )
     result["source"] = source
 
@@ -78,7 +90,11 @@ def _fallback_generate(query: str, skills: list[dict]) -> dict[str, Any]:
     explanation = "根据内置 NL2Bash 技能模板生成的命令。"
     alternatives: list[str] = []
 
-    if any(key in q for key in ["pdf", "所有 pdf", "pdf 文件"]):
+    if _is_disk_destructive_intent(query):
+        command = "lsblk -f"
+        alternatives = ["lsblk", "df -h"]
+        explanation = "格式化磁盘是高危操作；当前仅提供只读查看命令，用于确认磁盘和分区信息。"
+    elif any(key in q for key in ["pdf", "所有 pdf", "pdf 文件"]):
         command = "find . -type f -name '*.pdf'"
         explanation = "在当前目录及子目录中查找所有 PDF 文件。"
     elif "8080" in q and any(key in q for key in ["端口", "占用", "port"]):
@@ -132,6 +148,66 @@ def _extract_number(text: str) -> str | None:
     return match.group(1) if match else None
 
 
+def _check_query_intent_risk(query: str) -> dict[str, Any]:
+    command_safety = check_command_safety(query)
+    level = command_safety["risk_level"]
+    reasons = list(command_safety["risk_reasons"])
+    tips = list(command_safety["safety_tips"])
+    q = query.lower()
+
+    def add(new_level: str, reason: str, *new_tips: str) -> None:
+        nonlocal level
+        level = _max_level(level, new_level)
+        if reason not in reasons:
+            reasons.append(reason)
+        for tip in new_tips:
+            if tip and tip not in tips:
+                tips.append(tip)
+
+    if _is_disk_destructive_intent(query):
+        add(
+            "high",
+            "用户需求涉及格式化、清空或覆盖磁盘，真实执行会永久删除目标设备数据",
+            "当前推荐命令仅用于查看磁盘信息，不执行格式化",
+            "先确认设备名，例如 /dev/sdb，而不是系统盘",
+            "确保重要数据已备份",
+            "不要在未确认目标设备前执行 mkfs、dd 等写盘命令",
+        )
+
+    if any(key in q for key in ["删除根目录", "清空根目录", "删除系统目录"]):
+        add(
+            "high",
+            "用户需求涉及删除根目录或系统目录",
+            "不要对 /、/etc、/usr、/boot 等系统路径执行递归删除",
+            "先用 ls 或 find -print 确认目标范围",
+        )
+
+    restart_intent = "重启" in q and not any(key in q for key in ["记录", "日志", "时间", "历史", "查看"])
+    if restart_intent or any(key in q for key in ["关机", "shutdown", "reboot", "poweroff", "init 0"]):
+        add(
+            "high",
+            "用户需求涉及关机或重启，会中断当前机器上的服务和会话",
+            "确认没有正在运行的关键任务或远程用户后再操作",
+        )
+
+    return {"risk_level": level, "risk_reasons": reasons, "safety_tips": tips}
+
+
+def _is_disk_destructive_intent(query: str) -> bool:
+    q = query.lower()
+    disk_terms = ["磁盘", "硬盘", "分区", "/dev/", "disk", "drive", "partition"]
+    has_disk = any(term in q for term in disk_terms)
+    if "mkfs" in q:
+        return True
+    if any(term in q for term in ["格式化", "format"]) and has_disk:
+        return True
+    if any(term in q for term in ["清空", "擦除", "抹掉", "wipe"]) and has_disk:
+        return True
+    if "dd" in q and any(term in q for term in ["of=/dev", "写入磁盘", "写入硬盘", "写盘", "覆盖磁盘"]):
+        return True
+    return False
+
+
 def _as_string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -156,4 +232,3 @@ def _max_level(first: str, second: str) -> str:
     first = first if first in LEVEL_ORDER else "low"
     second = second if second in LEVEL_ORDER else "low"
     return first if LEVEL_ORDER[first] >= LEVEL_ORDER[second] else second
-
