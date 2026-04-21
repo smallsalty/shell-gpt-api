@@ -1,23 +1,20 @@
-# Shell-GPT Minimal Command Assistant
+# Shell-GPT Linux 终端助手
 
-一个最小可运行的类 shell-gpt 智能 Shell 命令助手，支持自然语言生成命令、命令解释、危险命令检测和历史亮点总结。
+一个最小可运行的 Shell 命令助手，面向 Linux 终端使用。用户输入中文或英文需求后，程序生成候选 Shell 命令；用户选择后，程序在当前终端执行命令，并在执行前显示风险等级和安全提示。
+
+项目重点是命令行交互，不需要打开网站或浏览器。
 
 ## 安装
 
-```powershell
-cd D:\firstmoney\shell-gpt\shell_assistant
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+```bash
+cd /path/to/shell-gpt
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env
 ```
 
-复制环境变量示例并填写 MiniMax API Key：
-
-```powershell
-Copy-Item .env.example .env
-```
-
-`.env` 示例：
+编辑 `.env`，填写 MiniMax API Key：
 
 ```env
 LLM_API_KEY=your_key
@@ -25,16 +22,87 @@ LLM_BASE_URL=https://api.minimax.io/v1
 LLM_MODEL=MiniMax-M2.7
 ```
 
-默认按 OpenAI 兼容的 `POST {LLM_BASE_URL}/chat/completions` 调用。如果账号使用的 MiniMax 网关路径不同，只需要调整 `LLM_BASE_URL`。
+未配置 `LLM_API_KEY` 时，程序仍会使用内置 skills fallback 生成部分常见命令。
 
-## 运行 API
+## 终端交互运行
 
-```powershell
-cd D:\firstmoney\shell-gpt\shell_assistant
-uvicorn app.main:app --reload
+推荐入口：
+
+```bash
+python shellgpt.py
 ```
 
-接口：
+也可以通过 CLI 子命令启动：
+
+```bash
+python -m app.cli interactive
+```
+
+启动后输入中文需求：
+
+```text
+请输入需求: 查找当前目录下所有 pdf 文件
+```
+
+程序会输出候选命令、解释和风险信息：
+
+```text
+推荐命令:
+[1] find . -type f -name '*.pdf'
+    风险等级: low
+
+解释:
+在当前目录及子目录中查找所有 PDF 文件。
+
+风险等级: low
+输入编号执行，输入 n 跳过，输入 q 退出:
+```
+
+输入编号后，程序会在当前终端执行命令，并显示命令输出和退出码。
+
+## 交互指令
+
+```text
+:help     查看帮助
+:history  查看历史亮点
+:q        退出
+:quit     退出
+```
+
+## CLI 单次命令
+
+除了交互模式，也可以直接使用原有 CLI：
+
+```bash
+python -m app.cli generate "查看 8080 端口被谁占用"
+python -m app.cli explain 'find . -name "*.py" | wc -l'
+python -m app.cli check "rm -rf /"
+python -m app.cli highlights
+```
+
+需要 JSON 输出时添加 `--json`：
+
+```bash
+python -m app.cli check "rm -rf /" --json
+```
+
+## 安全策略
+
+- `low` 风险命令：用户输入编号后执行。
+- `medium` 风险命令：用户输入编号后，必须再输入 `yes` 才执行。
+- `high` 风险命令：默认拒绝执行，只展示风险原因和安全建议。
+
+危险命令识别优先走本地规则，不依赖大模型。规则覆盖 `rm -rf /`、`mkfs`、`dd of=/dev/...`、`shutdown`、`reboot`、`chmod -R 777 /`、`curl | sh`、写入 `/etc` 等常见高风险模式。
+
+## 可选 API
+
+项目仍保留 FastAPI 能力，但不是主要使用方式：
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+接口包括：
 
 - `GET /health`
 - `POST /api/shell/generate`
@@ -42,64 +110,31 @@ uvicorn app.main:app --reload
 - `POST /api/shell/check`
 - `GET /api/shell/history/highlights`
 
-生成命令示例：
-
-```powershell
-curl -X POST http://127.0.0.1:8000/api/shell/generate `
-  -H "Content-Type: application/json" `
-  -d "{\"query\":\"查找当前目录下所有 pdf 文件\",\"shell_type\":\"bash\",\"os\":\"linux\",\"context\":\"\"}"
-```
-
-## 运行 CLI
-
-```powershell
-cd D:\firstmoney\shell-gpt\shell_assistant
-python -m app.cli generate "查找当前目录下所有 pdf 文件"
-python -m app.cli explain "find . -name `"*.py`" | wc -l"
-python -m app.cli check "rm -rf /"
-python -m app.cli highlights
-```
-
-需要机器可读输出时添加 `--json`：
-
-```powershell
-python -m app.cli check "rm -rf /" --json
-```
-
-## 验证场景
-
-```powershell
-python -m app.cli generate "查找当前目录下所有 pdf 文件" --json
-python -m app.cli generate "查看 8080 端口被谁占用" --json
-python -m app.cli generate "统计 logs 目录下包含 error 的行数" --json
-python -m app.cli generate "删除当前目录所有临时文件" --json
-python -m app.cli check "rm -rf /tmp/test" --json
-python -m app.cli check "rm -rf /" --json
-python -m app.cli explain "find . -name `"*.py`" | wc -l" --json
-python -m app.cli highlights --json
-```
-
-未配置 `LLM_API_KEY` 时，生成命令会使用内置 skills 模板做有限 fallback；配置 API Key 后，会使用 MiniMax-M2.7 生成更灵活的结果。
-
 ## 实现原理
 
-本系统采用“规则约束 + LLM 生成 + NL2Bash 技能提示”的混合方案。
+本系统采用“规则约束 + LLM 生成 + NL2Bash 技能提示”的混合方案：
 
-规则层用于危险命令识别，对 `rm -rf /`、`mkfs`、`dd of=/dev/...`、`curl | sh`、关机重启、递归权限修改、写入 `/etc` 等高风险操作做稳定提醒。这样可以弥补纯大模型在安全判断上的不稳定。
+- 规则层负责危险命令识别，保证高风险命令能被稳定拦截。
+- skills 层将 NL2Bash 常见任务模式整理成任务类别、命令模板和使用提示。
+- LLM 层使用 MiniMax-M2.7 完成自然语言理解、命令生成和命令解释。
+- 历史亮点层使用本地 `app/storage/history.json` 记录最近请求和命令，做简单统计。
 
-skills 层将 NL2Bash 等数据集中的常见任务模式总结为“任务类别 + 命令模板 + 使用提示”，覆盖文件查找、文本处理、进程系统、网络排查、权限用户、压缩归档、包管理等场景。生成命令前会用关键词匹配召回相关 skills，并注入提示词。
+这种方式比纯规则更灵活，比纯大模型更稳定，也比训练专用模型更省成本，适合作为课程实验和原型系统。
 
-LLM 层使用 MiniMax-M2.7 完成自然语言理解、命令生成、命令解释和摘要，要求输出统一 JSON，便于 API 和 CLI 处理。若模型输出不是 JSON，会进行一次轻量纠正和提取。
+## 最小验证
 
-历史亮点层将最近记录保存在本地 `app/storage/history.json`，通过简单规则统计常见类别、高频命令模式和高风险命令数量。
+在 Linux 终端中运行：
 
-这样设计比纯规则更灵活，比纯大模型更稳定，也比训练专用模型更省成本、实现更快，适合作为课程实验和原型系统。
+```bash
+python shellgpt.py
+```
 
-## 合理取舍
+依次输入：
 
-- 只做 Bash/Linux 主路径，不实现完整 Shell AST。
-- skills 检索使用关键词匹配，不引入向量库或 RAG 框架。
-- history 使用本地 JSON 文件，不引入数据库。
-- 命令解释采用常见命令规则 + LLM 补充，不追求覆盖所有 Shell 语法。
-- 不提供前端页面、用户系统、队列、Docker 编排或大规模测试框架。
+```text
+查找当前目录下所有 pdf 文件
+查看 8080 端口被谁占用
+rm -rf /
+```
 
+预期前两个请求能生成命令并允许选择执行，`rm -rf /` 会被识别为高风险并拒绝执行。

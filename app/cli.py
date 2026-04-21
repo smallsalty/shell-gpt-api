@@ -31,6 +31,8 @@ def main() -> None:
     hi = subparsers.add_parser("highlights", help="Show history highlights")
     hi.add_argument("--json", action="store_true")
 
+    subparsers.add_parser("interactive", help="Start interactive terminal mode")
+
     args = parser.parse_args()
 
     if args.command == "generate":
@@ -46,8 +48,13 @@ def main() -> None:
         result = explain_command(ExplainRequest(command=args.shell_command))
     elif args.command == "check":
         result = check_command_safety(CheckRequest(command=args.shell_command).command)
-    else:
+    elif args.command == "highlights":
         result = build_highlights()
+    else:
+        from shellgpt import interactive_main
+
+        interactive_main()
+        return
 
     if getattr(args, "json", False):
         print(jsonlib.dumps(result, ensure_ascii=False, indent=2))
@@ -100,4 +107,3 @@ def _print_list(title: str, items: list[str]) -> None:
 
 if __name__ == "__main__":
     main()
-
