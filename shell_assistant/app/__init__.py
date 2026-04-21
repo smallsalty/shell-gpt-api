@@ -1,0 +1,2 @@
+"""Minimal shell command assistant."""
+
