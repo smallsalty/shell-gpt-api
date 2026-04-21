@@ -90,17 +90,18 @@ def _print_recommendation(result: dict[str, Any], commands: list[str]) -> None:
 
 
 def _confirm_and_run(command: str) -> bool:
-    print("\n准备执行:")
-    print(command)
-    edited = input("直接回车执行；输入新命令可修改；输入 n 取消: ").strip()
+    print("\n准备执行，Enter 执行，可直接编辑命令:")
+    edited = _input_with_default("> ", command).strip()
     if edited in {"q", ":q", ":quit"}:
         print("已退出。")
         raise SystemExit
     if edited.lower() in {"n", "no"}:
         print("已取消执行。")
         return False
-    if edited:
-        command = edited
+    if not edited:
+        print("已取消执行。")
+        return False
+    command = edited
 
     safety = check_command_safety(command)
     print(f"\n最终命令: {command}")
@@ -122,6 +123,24 @@ def _confirm_and_run(command: str) -> bool:
         print(f"\n命令失败，退出码: {completed.returncode}")
     record_command(command, risk_level=safety["risk_level"])
     return True
+
+
+def _input_with_default(prompt: str, default: str) -> str:
+    try:
+        import readline
+    except ImportError:
+        print(default)
+        return input("直接回车执行；输入新命令可修改；输入 n 取消: ") or default
+
+    def hook() -> None:
+        readline.insert_text(default)
+        readline.redisplay()
+
+    readline.set_pre_input_hook(hook)
+    try:
+        return input(prompt)
+    finally:
+        readline.set_pre_input_hook(None)
 
 
 def _print_safety(safety: dict[str, Any]) -> None:
