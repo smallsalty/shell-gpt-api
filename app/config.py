@@ -20,6 +20,7 @@ class Settings:
     llm_base_url: str
     llm_model: str
     llm_timeout_seconds: float
+    llm_max_tokens: int
     history_path: Path
     history_limit: int
 
@@ -27,12 +28,12 @@ class Settings:
 def get_settings() -> Settings:
     return Settings(
         llm_api_key=os.getenv("LLM_API_KEY", ""),
-        llm_base_url=os.getenv("LLM_BASE_URL", "https://api.minimax.io/v1"),
+        llm_base_url=os.getenv("LLM_BASE_URL", "https://api.minimaxi.com/anthropic"),
         llm_model=os.getenv("LLM_MODEL", "MiniMax-M2.7"),
         llm_timeout_seconds=float(os.getenv("LLM_TIMEOUT_SECONDS", "25")),
+        llm_max_tokens=int(os.getenv("LLM_MAX_TOKENS", "2048")),
         history_path=Path(
             os.getenv("HISTORY_PATH", str(APP_DIR / "storage" / "history.json"))
         ),
-        history_limit=int(os.getenv("HISTORY_LIMIT", "100")),
+        history_limit=int(os.getenv("HISTORY_LIMIT", "10")),
     )
-

@@ -3,7 +3,7 @@ from typing import Any
 
 from app.models.schemas import GenerateRequest
 from app.services.command_service import generate_command
-from app.services.history_service import build_highlights
+from app.services.history_service import recent_commands, record_command
 from app.services.safety_service import check_command_safety
 
 
@@ -42,7 +42,7 @@ def interactive_main() -> None:
             continue
 
         _print_recommendation(result, commands)
-        choice = input("输入编号执行，输入 n 跳过，输入 q 退出: ").strip().lower()
+        choice = input("输入编号准备执行，输入 n 跳过，输入 q 退出: ").strip().lower()
         if choice in {"q", ":q", ":quit"}:
             print("已退出。")
             return
@@ -89,24 +89,39 @@ def _print_recommendation(result: dict[str, Any], commands: list[str]) -> None:
     _print_safety(primary_safety)
 
 
-def _confirm_and_run(command: str) -> None:
+def _confirm_and_run(command: str) -> bool:
+    print("\n准备执行:")
+    print(command)
+    edited = input("直接回车执行；输入新命令可修改；输入 n 取消: ").strip()
+    if edited in {"q", ":q", ":quit"}:
+        print("已退出。")
+        raise SystemExit
+    if edited.lower() in {"n", "no"}:
+        print("已取消执行。")
+        return False
+    if edited:
+        command = edited
+
     safety = check_command_safety(command)
-    print(f"\n准备执行: {command}")
+    print(f"\n最终命令: {command}")
     _print_safety(safety)
 
     if safety["risk_level"] == "high":
         print("高风险命令已被拒绝执行。")
-        return
+        return False
 
     if safety["risk_level"] == "medium":
         confirm = input("该命令存在中等风险，输入 yes 确认执行: ").strip()
         if confirm != "yes":
             print("已取消执行。")
-            return
+            return False
 
     print("\n开始执行:\n")
     completed = subprocess.run(command, shell=True)
-    print(f"\n退出码: {completed.returncode}")
+    if completed.returncode != 0:
+        print(f"\n命令失败，退出码: {completed.returncode}")
+    record_command(command, risk_level=safety["risk_level"])
+    return True
 
 
 def _print_safety(safety: dict[str, Any]) -> None:
@@ -122,17 +137,22 @@ def _print_safety(safety: dict[str, Any]) -> None:
 
 
 def _print_history() -> None:
-    highlights = build_highlights()
-    print(f"\n历史记录数: {highlights['total_records']}")
-    print(f"高风险次数: {highlights['high_risk_count']}")
-    if highlights.get("top_categories"):
-        print("常见类别:")
-        for item in highlights["top_categories"]:
-            print(f"- {item['name']}: {item['count']}")
-    if highlights.get("frequent_patterns"):
-        print("高频命令:")
-        print(", ".join(highlights["frequent_patterns"]))
-    print(highlights["summary"])
+    items = recent_commands(10)
+    if not items:
+        print("\n暂无历史命令。")
+        return
+
+    print("\n最近命令:")
+    for index, item in enumerate(items, start=1):
+        print(f"[{index}] {item['command']}")
+
+    choice = input("输入编号复刻执行，输入 n 返回: ").strip().lower()
+    if choice in {"", "n", "no"}:
+        return
+    if not choice.isdigit() or not (1 <= int(choice) <= len(items)):
+        print("选择无效。")
+        return
+    _confirm_and_run(items[int(choice) - 1]["command"])
 
 
 def _print_help() -> None:

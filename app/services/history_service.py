@@ -21,6 +21,10 @@ def append_history(record: dict[str, Any]) -> None:
     _write_json(path, records)
 
 
+def record_command(command: str, query: str = "", risk_level: str = "low") -> None:
+    append_history({"query": query, "command": command, "risk_level": risk_level})
+
+
 def read_history() -> list[dict[str, Any]]:
     path = get_settings().history_path
     if not path.exists():
@@ -30,6 +34,27 @@ def read_history() -> list[dict[str, Any]]:
         return data if isinstance(data, list) else []
     except (json.JSONDecodeError, OSError):
         return []
+
+
+def recent_commands(limit: int = 10) -> list[dict[str, Any]]:
+    commands = []
+    seen = set()
+    for item in reversed(read_history()):
+        command = str(item.get("command", "")).strip()
+        if not command or command in seen:
+            continue
+        commands.append(
+            {
+                "timestamp": item.get("timestamp", ""),
+                "query": item.get("query", ""),
+                "command": command,
+                "risk_level": item.get("risk_level", "low"),
+            }
+        )
+        seen.add(command)
+        if len(commands) >= limit:
+            break
+    return commands
 
 
 def build_highlights() -> dict[str, Any]:
@@ -95,4 +120,3 @@ def _summary(top_categories: list[dict[str, Any]], high_risk_count: int) -> str:
         else "暂未出现高风险命令。"
     )
     return f"最近操作以{names}为主，{risk_text}"
-

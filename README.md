@@ -18,11 +18,13 @@ cp .env.example .env
 
 ```env
 LLM_API_KEY=your_key
-LLM_BASE_URL=https://api.minimax.io/v1
+LLM_BASE_URL=https://api.minimaxi.com/anthropic
 LLM_MODEL=MiniMax-M2.7
+LLM_MAX_TOKENS=2048
 ```
 
 未配置 `LLM_API_KEY` 时，程序仍会使用内置 skills fallback 生成部分常见命令。
+当前 MiniMax 接入使用 Anthropic-compatible Messages API。不要把 `LLM_BASE_URL` 配成 `https://api.minimax.com/v1` 或 OpenAI `/chat/completions` 风格地址。
 
 ## 终端交互运行
 
@@ -86,11 +88,15 @@ python -m app.cli highlights
 python -m app.cli check "rm -rf /" --json
 ```
 
+`:history` 只显示最近 10 条具体命令。输入编号可以复刻执行，执行前仍可手动修改命令。
+
 ## 安全策略
 
 - `low` 风险命令：用户输入编号后执行。
 - `medium` 风险命令：用户输入编号后，必须再输入 `yes` 才执行。
 - `high` 风险命令：默认拒绝执行，只展示风险原因和安全建议。
+
+选择命令后会先进入“准备执行”阶段。直接回车执行当前命令；输入新命令可以修改；输入 `n` 取消。命令成功时不额外打印退出码，只有失败时显示非 0 退出码。
 
 危险命令识别优先走本地规则，不依赖大模型。规则覆盖 `rm -rf /`、`mkfs`、`dd of=/dev/...`、`shutdown`、`reboot`、`chmod -R 777 /`、`curl | sh`、写入 `/etc` 等常见高风险模式。
 

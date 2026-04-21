@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import time
 from typing import Any
 
 import httpx
@@ -21,13 +22,17 @@ class MiniMaxClient:
 
         last_error = ""
         prompt = user_prompt
-        for attempt in range(2):
+        max_attempts = 5
+        for attempt in range(max_attempts):
             try:
-                content = self._chat(system_prompt, prompt)
+                content = self._messages(system_prompt, prompt)
             except Exception as exc:
                 last_error = str(exc)
-                logger.warning("LLM request failed: %s", last_error)
-                continue
+                logger.debug("LLM request failed: %s", last_error)
+                if attempt < max_attempts - 1 and _is_retryable(exc):
+                    time.sleep(min(2**attempt, 4))
+                    continue
+                break
 
             parsed = _parse_json_object(content)
             if parsed is not None:
@@ -35,34 +40,66 @@ class MiniMaxClient:
 
             last_error = "LLM returned non-JSON content"
             prompt = (
-                "上一轮输出不是合法 JSON。请只输出一个 JSON 对象，不要 Markdown，"
-                "不要解释文字。原始任务如下：\n"
+                "The previous response was not valid JSON. Return exactly one JSON "
+                "object only, without Markdown or extra text. Original task:\n"
                 + user_prompt
             )
 
         return {"error": last_error or "LLM request failed"}
 
-    def _chat(self, system_prompt: str, user_prompt: str) -> str:
-        base = self.settings.llm_base_url.rstrip("/")
-        url = base if base.endswith("/chat/completions") else f"{base}/chat/completions"
+    def _messages(self, system_prompt: str, user_prompt: str) -> str:
         payload = {
             "model": self.settings.llm_model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
+            "max_tokens": self.settings.llm_max_tokens,
             "temperature": 0.1,
-            "response_format": {"type": "json_object"},
+            "system": system_prompt,
+            "messages": [{"role": "user", "content": user_prompt}],
         }
         headers = {
-            "Authorization": f"Bearer {self.settings.llm_api_key}",
-            "Content-Type": "application/json",
+            "x-api-key": self.settings.llm_api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
         }
         with httpx.Client(timeout=self.settings.llm_timeout_seconds) as client:
-            response = client.post(url, headers=headers, json=payload)
+            response = client.post(_messages_url(self.settings.llm_base_url), headers=headers, json=payload)
             response.raise_for_status()
             data = response.json()
-        return data["choices"][0]["message"]["content"]
+        return _extract_text_content(data)
+
+
+def _messages_url(base_url: str) -> str:
+    base = base_url.rstrip("/")
+    if base.endswith("/v1/messages"):
+        return base
+    if base.endswith("/anthropic"):
+        return f"{base}/v1/messages"
+    if base.endswith("/anthropic/v1"):
+        return f"{base}/messages"
+    return f"{base}/v1/messages"
+
+
+def _extract_text_content(data: dict[str, Any]) -> str:
+    content = data.get("content", [])
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+
+    chunks: list[str] = []
+    for block in content:
+        if isinstance(block, str):
+            chunks.append(block)
+        elif isinstance(block, dict) and block.get("type") == "text":
+            chunks.append(str(block.get("text", "")))
+        elif isinstance(block, dict) and "text" in block:
+            chunks.append(str(block.get("text", "")))
+    return "".join(chunks)
+
+
+def _is_retryable(exc: Exception) -> bool:
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in {429, 500, 502, 503, 504, 529}
+    return isinstance(exc, httpx.TransportError)
 
 
 def _parse_json_object(text: str) -> dict[str, Any] | None:
@@ -84,4 +121,3 @@ def _parse_json_object(text: str) -> dict[str, Any] | None:
         return value if isinstance(value, dict) else None
     except json.JSONDecodeError:
         return None
-
